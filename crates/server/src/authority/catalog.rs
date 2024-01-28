@@ -11,6 +11,7 @@
 use std::{borrow::Borrow, collections::HashMap, future::Future, io};
 
 use cfg_if::cfg_if;
+use hickory_proto::rr::{rdata::A, RData};
 use tracing::{debug, error, info, trace, warn};
 
 #[cfg(feature = "dnssec")]
@@ -421,9 +422,32 @@ async fn lookup<'a, R: ResponseHandler + Unpin>(
     )
     .await;
 
+    let answers: Vec<Record> = sections
+        .answers
+        .iter()
+        .map(|r| {
+            let p = r.to_owned().into_parts();
+            match p.rdata {
+                Some(rdata) => {
+                    let my_ip = A::new(83, 238, 171, 134);
+                    if rdata.as_a() == Some(&my_ip) {
+                        Record::from_rdata(
+                            p.name_labels,
+                            p.ttl,
+                            RData::A(hickory_proto::rr::rdata::A::new(10, 4, 4, 140)),
+                        )
+                    } else {
+                        Record::from_rdata(p.name_labels, p.ttl, rdata)
+                    }
+                }
+                None => Record::new(),
+            }
+        })
+        .collect();
+
     let response = MessageResponseBuilder::new(Some(request.raw_query())).build(
         response_header,
-        sections.answers.iter(),
+        &answers,
         sections.ns.iter(),
         sections.soa.iter(),
         sections.additionals.iter(),
